@@ -1,0 +1,106 @@
+sources:
+  mongodb-groceries:
+    kind: mongodb
+    uri: <ADD_YOUR_CONNECTION_STRING>
+tools:
+  add_to_cart:
+    kind: mongodb-update-one
+    source: mongodb-groceries
+    description: Add a product to a user's cart.
+    database: grocery_store
+    collection: carts
+    filterPayload: |
+      {
+        "username": {{ json .username }}
+      }
+    filterParams:
+      - name: username
+        type: string
+        description: The username of the user.
+    updatePayload: |
+      {
+        "$addToSet": { "products": { "product": {{ json .product }}, "category": {{ json .category }}, "price": {{ json .price }} } }
+      }
+    updateParams:
+      - name: product
+        type: string
+        description: The product name to add to the cart.
+      - name: category
+        type: string
+        description: The category of the product.
+      - name: price
+        type: float
+        description: The price of the product.
+    canonical: true
+    upsert: true
+  calculate_cart_total:
+    kind: mongodb-aggregate
+    source: mongodb-groceries
+    description: Calculate the total price of all products in a user's cart.
+    database: grocery_store
+    collection: carts
+    readOnly: true
+    pipelinePayload: |
+      [
+        {
+            "$match": {
+                "username": {{ json .username }}
+            }
+        },
+        {
+            "$project": {
+                "_id": "0",
+                "total": { "$sum": "$products.price" }
+            }
+        }
+      ]
+    pipelineParams:
+      - name: username
+        type: string
+        description: The username of the user.
+  find_similar_documents:
+    kind: mongodb-aggregate
+    source: mongodb-groceries
+    description: Find grocery products in the inventory by a vector embedding of the product name.
+    database: "grocery_store"
+    collection: "inventory"
+    readOnly: true
+    pipelinePayload: |
+      [
+        {
+          "$vectorSearch": {
+            "index": {{ json .index}},
+            "path": {{ json .path}},
+            "queryVector": {{ json .embedding }},
+            "numCandidates": 100,
+            "limit": 10
+          }
+        },
+        {
+          "$project": {
+            "_id": 0,
+            {{ json .path }}: 0
+          }
+        }
+      ]
+    pipelineParams:
+      - name: embedding
+        type: array
+        description: The embedding vector of the product to search for.
+        items:
+          type: float
+          name: attribute
+          description: A number in the embedding vector.
+      - name: index
+        type: string
+        description: The name of the vector index to use.
+      - name: path
+        type: string
+        description: The field in the documents to search.
+
+toolsets:
+  queries-toolset:
+    - find_similar_documents
+  grocery-shopping-toolset:
+    - add_to_cart
+    - calculate_cart_total
